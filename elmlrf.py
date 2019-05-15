@@ -47,6 +47,7 @@ class ELMLRF(object):
         self._B = -1  # output weight Beta
         self._net = {}
 
+
     def build(self, dtype=tf.float32, randseed=None):
         """"
 
@@ -68,20 +69,23 @@ class ELMLRF(object):
             dtype=dtype, shape=[None] + self._insize, name='inputs')
         self._net['T'] = tf.placeholder(
             dtype=dtype, shape=[None] + self._outsize, name='targets')
+        self._net['KP'] = tf.placeholder(
+            dtype=dtype, name='keep_prob')
 
         # ----------------------------gen weights
         print("---Generates ELMLRF random weights(orthogonal)...")
         InitA = tf.orthogonal_initializer(gain=1.0, dtype=dtype)
+        # InitA = tf.ones_initializer(dtype=dtype)
         self._W['C1'] = tf.get_variable(
-            name='C1', shape=[3, 3, self._insize[2], 8],
+            name='C1', shape=[4, 4, self._insize[2], 32],
             dtype=dtype, initializer=InitA, trainable=False)
 
         self._W['C2'] = tf.get_variable(
-            name='C2', shape=[3, 3, 8, 16],
+            name='C2', shape=[3, 3, 32, 32],
             dtype=dtype, initializer=InitA, trainable=False)
 
         self._W['C3'] = tf.get_variable(
-            name='C3', shape=[3, 3, 16, 32],
+            name='C3', shape=[3, 3, 32, 32],
             dtype=dtype, initializer=InitA, trainable=False)
 
         # ----------------------------gen net
@@ -92,25 +96,32 @@ class ELMLRF(object):
             padding="VALID", data_format='NHWC',
             dilations=[1, 1, 1, 1], name='C1')
 
+        self._net['C1'] = tf.nn.swish(self._net['C1'])
+
         # self._net['P1'] = tf.nn.max_pool(
         self._net['P1'] = tt.nn.square_root_pool(
             self._net['C1'],
-            ksize=[1, 2, 2, 1],  # [1, kH, kW, 1]
+            ksize=[1, 3, 3, 1],  # [1, kH, kW, 1]
             strides=[1, 1, 1, 1],  # [1, sH, sW, 1]
             padding="VALID", data_format='NHWC', name='P1')
 
+        # self._net['P1'] = tf.nn.lrn(self._net['P1'])
         self._net['C2'] = tf.nn.conv2d(
             self._net['P1'], self._W['C2'],
             strides=[1, 1, 1, 1],  # [1, sH, sW, 1]
             padding="VALID", data_format='NHWC',
             dilations=[1, 1, 1, 1], name='C2')
 
+        self._net['C2'] = tf.nn.swish(self._net['C2'])
+
         # self._net['P2'] = tf.nn.max_pool(
         self._net['P2'] = tt.nn.square_root_pool(
             self._net['C2'],
-            ksize=[1, 2, 2, 1],  # [1, kH, kW, 1]
+            ksize=[1, 3, 3, 1],  # [1, kH, kW, 1]
             strides=[1, 1, 1, 1],  # [1, sH, sW, 1]
             padding="VALID", data_format='NHWC', name='P2')
+
+        # self._net['P2'] = tf.nn.lrn(self._net['P2'])
 
         self._net['C3'] = tf.nn.conv2d(
             self._net['P2'], self._W['C3'],
@@ -118,16 +129,26 @@ class ELMLRF(object):
             padding="VALID", data_format='NHWC',
             dilations=[1, 1, 1, 1], name='C3')
 
+        self._net['C3'] = tf.nn.swish(self._net['C3'])
+
         # self._net['P3'] = tf.nn.max_pool(
         self._net['P3'] = tt.nn.square_root_pool(
             self._net['C3'],
-            ksize=[1, 2, 2, 1],  # [1, kH, kW, 1]
+            ksize=[1, 3, 3, 1],  # [1, kH, kW, 1]
             strides=[1, 1, 1, 1],  # [1, sH, sW, 1]
             padding="VALID", data_format='NHWC', name='P3')
 
-        HO = self._net['P3']
+        # self._net['P3'] = tf.nn.lrn(self._net['P3'])
+
+        # HO = self._net['P3']
+        HO = self._net['P1']
+        # HO = tf.nn.swish(self._net['P1'])
+        # HO = tf.nn.lrn(HO)
+        # HO = tf.nn.swish(HO)
+        # HO = tf.nn.swish(HO)
+        # HO = self._net['C1']
+        HO = tf.nn.dropout(HO, self._net['KP'])
         N, H, W, C = HO.get_shape()
-        # self._L = tf.cast(H * W * C, tf.int64)
 
         # H --> N - H * W * C
         self._net['H'] = tf.reshape(HO, shape=[-1, H * W * C], name='H')
@@ -223,7 +244,10 @@ class ELMLRF(object):
 
         print("---Forward propagation...")
         Htrain = self._sess.run(
-            self._net['H'], {self._net['X']: Xtrain, self._net['T']: Ttrain})
+            self._net['H'], {self._net['X']: Xtrain, self._net['T']: Ttrain, self._net['KP']: 1.0})
+
+        Hval = self._sess.run(
+            self._net['H'], {self._net['X']: Xval, self._net['T']: Tval, self._net['KP']: 1.0})
 
         for C in Cs:
             print("---")
@@ -239,8 +263,6 @@ class ELMLRF(object):
 
             print("---Start Validing...")
             print("~~~balance factor: ", self._C)
-            Hval = self._sess.run(
-                self._net['H'], {self._net['X']: Xval, self._net['T']: Tval})
 
             print("---Prediction...")
             Y = self._predictY(Hval)
