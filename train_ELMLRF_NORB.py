@@ -53,8 +53,8 @@ Tval = np.eye(nC)[Tval]  # 24300-5
 Y = np.argmax(Tval, axis=1)
 print(Y[0:10])
 
-Ns = 10000
-Ns = 24300
+Ns = 1000
+# Ns = 24300
 
 Xtrain = Xtrain[0:Ns, :]
 Ttrain = Ttrain[0:Ns, :]
